@@ -1,0 +1,259 @@
+##########################################################################################################################
+
+# Set run time sequence
+final <- 120
+times_nf <- timer(final=final)
+
+### Initialize Q(t=0) values and assign names
+
+initial <- as.numeric(read.table("initial_rumen.txt",header=T))
+names(initial) <- names(read.table("initial_rumen.txt",header=T))
+
+initial <- c(initial[c("Q_Fd","Q_Sd","Q_Wr")],1e-5,1e-5,initial[c("Q_He","Q_Mi","Q_Ac","Q_Pr","Q_Bu","Q_Hy","Q_Me","f_NADH")],rep(0,8))
+
+more_names <- c("Q_Na","Q_Ni","Q_Mt","f_NaIn","f_NaAb","f_NaEx","f_NaNi","f_NiAb","f_NiEx","f_NiAm")
+names(initial)[names(initial) %in% ""] <- more_names
+
+
+### load feed composition and feed intake rate input data 
+feedcomp	<- read.table("Feed_comp_VL2017.txt",header=T)
+feedcomp[c('St','Sr','WSC')] <- c(feedcomp['St']+0.5*feedcomp['Sr'],Sr=0,feedcomp['WSC']+0.5*feedcomp['Sr']) # Equally divide soluble starch (Sr) over Sd and Wr
+
+FI_rate_2m <- as.data.frame(read.table("FI_rate_2m.txt",header=T)) # Read feed intake rate throughout 0.5 day
+FI_rate_2m[,'FI_rate'] <- feedcomp$c_DM*FI_rate_2m[,'FI_rate'] # Convert to fresh product to DM
+FI_rate_2m <- rbind(FI_rate_2m,cbind(12+FI_rate_2m[,c('T_begin','T_eind')],FI_rate=FI_rate_2m[,'FI_rate'])) # Set feed intake rate for a whole day
+
+feedcomp	<- feedcomp[!names(feedcomp) %in% c('c_DM','Sr')] # Remove dry matter and soluble starch contents
+
+### Initialize constants and parameters and FME model code
+
+Na_par <- c(k_NaNi=1.5,k_NiAm=0.113154,J_Ni_HyMe=0.001173)
+
+source("RumenModel_HNO32_Code.R")
+
+
+# Run model with three different doses of HNO3
+out_HNO32 <- list(out_000 <- NAD_confurc(times=times_nf,initial=initial,feed=as.data.frame(c(feedcomp,c_HNO3=0)),Parms=c(Parms_7,Na_par),
+                                         Constants=Constants, Yields=Yields, feedintake=FI_rate_2m,stpsz=delt), # 0 g HNO3/kg DM
+                  out_010 <- NAD_confurc(times=times_nf,initial=initial,feed=as.data.frame(c(feedcomp,c_HNO3=0.16)),Parms=c(Parms_7,Na_par[-1]),
+                                         Constants=c(Constants,0.01*Na_par[1]), Yields=Yields, feedintake=FI_rate_2m,stpsz=delt), # 10 g HNO3/kg DM
+                  out_020 <- NAD_confurc(times=times_nf,initial=initial,feed=as.data.frame(c(feedcomp,c_HNO3=0.32)),Parms=c(Parms_7,Na_par[-1]),
+                                         Constants=c(Constants,0.01*Na_par[1]), Yields=Yields, feedintake=FI_rate_2m,stpsz=delt)) # 20 g HNO3/kg DM
+
+cat('Methane emissions is',
+    (max(out_HNO32[[3]]$Q_Mt) - out_HNO32[[3]]$Q_Mt[out_HNO32[[3]]$time==final-24])*16,',',
+    (max(out_HNO32[[2]]$Q_Mt) - out_HNO32[[2]]$Q_Mt[out_HNO32[[2]]$time==final-24])*16,'and',
+    (max(out_HNO32[[1]]$Q_Mt) - out_HNO32[[1]]$Q_Mt[out_HNO32[[1]]$time==final-24])*16,
+    'g/d after 0, 0.16 and 0.32 mol/kg DMI of Nitrate supplementation, respectively.')
+
+pdf("HNO32_vs_Time.pdf",height=7.25,width=7.25)
+#tiff("HNO32_vs_Time.tif",height=7.25,width=7.25,units='in',res=600,compression='lzw')
+par(mfrow=c(3,3),mar=c(2,5,0,0),oma=c(2,0.1,0.5,0.5))
+plot_Dyn_DSM(data=out_HNO32,var_y='C_Na',ylim=c(0,15e-3),ylab=expression(italic(C)[NO[3]^{'-'}]~' (mM)'),lgrthm=F)
+axis(side=2,at=c(0,5e-3,10e-3,15e-3,20e-3,25e-3),labels=c('0',5,'10',15,'20','25'),las=2,cex.axis=1.1) 
+legend("topleft",c(expression(paste('0.00',~mol~'(kg DMI)'^{-1})),expression(paste('0.16',~mol~'(kg DMI)'^{-1})),expression(paste('0.32',~mol~'(kg DMI)'^{-1}))),
+       cex=1.05,col=c("black","magenta","limegreen"),lty=1,lwd=2)
+plot_Dyn_DSM(data=out_HNO32,var_y='C_Ni',ylim=c(0,15e-3),ylab=expression(italic(C)[NO[2]^{'-'}]~' (mM)'),lgrthm=F)
+axis(side=2,at=c(0,5e-3,10e-3,15e-3,20e-3,25e-3),labels=c('0',5,'10',15,'20','25'),las=2,cex.axis=1.1) 
+plot_Dyn_DSM(data=out_HNO32,var_y='P_Hy',ylim=c(1e-4,0.3),ylab=expression(italic(p)[H[2]]~' (atm)'),lgrthm=T)
+axis(side=2,at=c(1e-4,1e-3,1e-2,1e-1),labels=c('1e-4','1e-3','1e-2','1e-1'),las=2,cex.axis=1.1) 
+plot_Dyn_DSM(data=out_HNO32,var_y='P_Mt_HyMe',ylim=c(0,2),ylab=expression(CH[4]~'emission rate'~paste('(',mol~h^{-1},')')),lgrthm=F)
+axis(side=2,at=c(0,0.5,1,1.5,2),labels=c('0.0',0.5,'1.0',1.5,'2.0'),las=2,cex.axis=1.2) 
+plot_Dyn_DSM(data=out_HNO32,var_y='F_T_Fd',ylim=c(-3,1),ylab=expression(italic(F)[T]),lgrthm=F)
+axis(side=2,at=c(-3,-2,-1,0,1),labels=c(-3,-2,-1,0,1),las=2,cex.axis=1.2) 
+plot_Dyn_DSM(data=out_HNO32,var_y='r_NAD',ylim=c(0,4),ylab=expression(italic(r)[NAD]),lgrthm=F)
+axis(side=2,at=c(0,1,2,3,4),labels=c(0,1,2,3,4),las=2,cex.axis=1.2) 
+plot_Dyn_DSM(data=out_HNO32,var_y='p_Ac',ylim=c(0.4,0.8),ylab=expression(Ac^{'-'}~'proportion (-)'),lgrthm=F)
+axis(side=1,at=final-c(24,18,12,6,0),labels=c(0,6,12,18,24),las=1,cex.axis=1.2) 
+axis(side=2,at=c(0.4,0.5,0.6,0.7,0.8),labels=c(0.4,0.5,0.6,0.7,0.8),las=2,cex.axis=1.2) 
+plot_Dyn_DSM(data=out_HNO32,var_y='p_Pr',ylim=c(0.1,0.4),ylab=expression(Pr^{'-'}~'proportion (-)'),lgrthm=F)
+axis(side=1,at=final - c(24,18,12,6,0),labels=c(0,6,12,18,24),las=1,cex.axis=1.2) 
+axis(side=2,at=c(0.1,0.2,0.3,0.4),labels=c(0.1,0.2,0.3,0.4),las=2,cex.axis=1.2)
+plot_Dyn_DSM(data=out_HNO32,var_y='p_Bu',ylim=c(0.11,0.17),ylab=expression(Bu^{'-'}~'proportion (-)'),lgrthm=F)
+axis(side=1,at=final - c(24,18,12,6,0),labels=c(0,6,12,18,24),las=1,cex.axis=1.2) 
+axis(side=2,at=c(0.11,0.13,0.15,0.17),labels=c(0.11,0.13,0.15,0.17),las=2,cex.axis=1.15) 
+mtext(outer=T,side=1, line=0.75, 'Time (h)',cex=1.2)
+dev.off()
+
+#####################################
+### 'Global' sensitivity analysis ###
+#####################################
+
+final <- 240
+times_nf <- timer(final=final)
+source('RumenModel_HNO32_GSA.R')
+
+########################################
+### Parameter optimization procedure ###
+########################################
+
+# initialize Q_i(t=0)
+initial <- read.table("initial_HNO32.txt",header=T)
+more_names <- c("Q_Mt","f_NaIn","f_NaAb","f_NaEx","f_NaNi","f_NiAb","f_NiEx","f_NiAm")
+initial[,more_names] <- matrix(0,nrow=nrow(initial),ncol=length(more_names)) # Set Q_zeros at zero
+
+# initialize feed composition
+feedcomp <- read.table("Feed_comp_HNO32.csv",header=T,sep=',')
+feedcomp[,c('St','Sr','WSC')] <- cbind(feedcomp[,'St']+0.5*feedcomp[,'Sr'],Sr=0,feedcomp[,'WSC']+0.5*feedcomp[,'Sr']) # Equally divide soluble starch (Sr) over degradable starch (St) and soluble sugars (WSC)
+feedcomp <- feedcomp[,-c(match(c('c_DM','Sr'),colnames(feedcomp)))]
+
+
+# initialize feed intake rate profile
+FI_rate_2m <- read.table("FI_rate_Olijhoek.csv",header=T,sep=',') # Load feed intake rate
+FI_rate_2m <- list(FI_rate_2m[,c("T_begin","T_eind","FI_rate")],
+                   FI_rate_2m[,c("T_begin","T_eind","FI_rate_med")],
+                   FI_rate_2m[,c("T_begin","T_eind","FI_rate_high")],
+                   as.data.frame(read.table("FI_rate_SvZ.csv",header=T,sep=',')),
+                   as.data.frame(read.table("FI_rate_Veneman.csv",header=T,sep=',')))
+
+# Rename FI_rate_xxx to FI_rate
+for (j in 2:3) colnames(FI_rate_2m[[j]])[3] <- 'FI_rate'
+
+
+### Model initial runs
+
+times_nf <- list(timer(2,10,12,final=final),timer(2,10,12,final=final),timer(2,10,12,final=final),
+                 timer(2,10,12,final=final),timer(2,8,10,final=final))
+
+final <- 168
+times_nf <- list(seq(0,final,5e-3),seq(0,final,5e-3),seq(0,final,5e-3),
+                 seq(0,final,5e-3),seq(0,final,5e-3))
+
+#Na_par <- c(k_NaNi=4e-4, k_NiAm=1.25e-4, J_Ni_HyMe=5e-3)
+
+###
+
+# initialize Control feed composition
+feedcomp_Ctrl <- read.table("Feed_comp_HNO32_cntrls.csv",header=T,sep=',')
+feedcomp_Ctrl[,c('St','Sr','WSC')] <- cbind(feedcomp_Ctrl[,'St']+0.5*feedcomp_Ctrl[,'Sr'],Sr=0,feedcomp_Ctrl[,'WSC']+0.5*feedcomp_Ctrl[,'Sr']) # Equally divide soluble starch (Sr) over degradable starch (St) and soluble sugars (WSC)
+feedcomp_Ctrl <- feedcomp_Ctrl[,-c(match(c('c_DM','Sr'),colnames(feedcomp_Ctrl)))]
+
+
+# initialize feed intake rate profile
+FI_rate_2m_Ctrl <- list(as.data.frame(read.table("FI_rate_Olijhoek_cntrl.csv",header=T,sep=',')), # Load feed intake rate,
+                         as.data.frame(read.table("FI_rate_SvZ.csv",header=T,sep=',')),
+                         as.data.frame(read.table("FI_rate_Veneman_cntrl.csv",header=T,sep=',')))
+
+for (j in 1:length(FI_rate_2m_Ctrl)){colnames(FI_rate_2m_Ctrl[[j]])[3] <- 'FI_rate'}
+
+out_HNO32_Ctrl <- NULL
+for (i in 1:nrow(feedcomp_Ctrl)){
+  Qt_0 <- as.numeric(initial[i,])
+  names(Qt_0) <- c("Q_Fd","Q_Sd","Q_Wr","Q_Na","Q_Ni","Q_He","Q_Mi","Q_Ac","Q_Pr","Q_Bu","Q_Hy","Q_Me","f_NADH",more_names)
+  out_HNO32_Ctrl[[length(out_HNO32_Ctrl)+1]] <- NAD_confurc(times=times_nf[[i]],initial=Qt_0,feed=feedcomp_Ctrl[i,],
+                                                  Parms=c(Parms_7,Na_par),
+                                                  Constants=Constants,Yields=Yields,feedintake=FI_rate_2m_Ctrl[[i]],stpsz=delt)
+} # End of for loop
+
+
+CH4_Ctrl_P <- 16*c((max(out_HNO32_Ctrl[[1]]$Q_Mt) - out_HNO32_Ctrl[[1]]$Q_Mt[out_HNO32_Ctrl[[1]]$time==final-24]),
+                 (max(out_HNO32_Ctrl[[2]]$Q_Mt) - out_HNO32_Ctrl[[2]]$Q_Mt[out_HNO32_Ctrl[[2]]$time==final-24]),
+                 (max(out_HNO32_Ctrl[[3]]$Q_Mt) - out_HNO32_Ctrl[[3]]$Q_Mt[out_HNO32_Ctrl[[3]]$time==final-24]))
+
+cat('Control methane emissions are',
+    CH4_Ctrl_P[1],',',
+    CH4_Ctrl_P[2],'and',
+    CH4_Ctrl_P[3],
+    'g/d for Olijhoek 2016, Van Zijderveld 2011 and Veneman 2015, respectively.')
+
+cat('Observed values are: ',CH4_Ctrl_O[1],',', CH4_Ctrl_O[2],'and',CH4_Ctrl_O[3],'g/d, respectively')
+
+
+### Load output observed {U_Hy_HyEm, P_Mt_HyMe}
+
+obsdata <- read.csv("Olijhoek_obs2fit.csv",sep=',',header=T)
+obsdata <- list(obsdata[,c("time","U_Hy_HyEm_low","P_Mt_HyMe_low")],
+                obsdata[,c("time","U_Hy_HyEm_med","P_Mt_HyMe_med")],
+                obsdata[,c("time","U_Hy_HyEm_high","P_Mt_HyMe_high")],
+                read.csv("SvZ_obs2fit.csv",sep=',',header=T),
+                read.csv("Veneman_obs2fit.csv",sep=',',header=T))
+
+
+# Take log of Hydrogen emission rates
+for (q in 1:length(obsdata)){obsdata[[q]][,2] <- log(obsdata[[q]][,2])}
+
+# Rename column names
+for (r in 1:length(obsdata)){colnames(obsdata[[r]])[2:3] <- c('log_U_Hy_HyEm','P_Mt_HyMe')}
+
+# Correct for model error based on Ctrl
+obsdata[[1]]$P_Mt_HyMe <- obsdata[[1]]$P_Mt_HyMe*(CH4_Ctrl_P/CH4_Ctrl_O)[1] 
+obsdata[[2]]$P_Mt_HyMe <- obsdata[[2]]$P_Mt_HyMe*(CH4_Ctrl_P/CH4_Ctrl_O)[1]
+obsdata[[3]]$P_Mt_HyMe <- obsdata[[3]]$P_Mt_HyMe*(CH4_Ctrl_P/CH4_Ctrl_O)[1]
+obsdata[[4]]$P_Mt_HyMe <- obsdata[[4]]$P_Mt_HyMe*(CH4_Ctrl_P/CH4_Ctrl_O)[2]
+obsdata[[5]]$P_Mt_HyMe <- obsdata[[5]]$P_Mt_HyMe*(CH4_Ctrl_P/CH4_Ctrl_O)[3]
+
+
+###
+
+
+################################
+# ModCost procedure single obs #
+################################
+
+### Calculates model cost (sum of square residuals) or discrepancy between model predictions and Observations. 
+### Hence, helps create an objective function
+
+
+### Costfunc diurnal
+
+Costfunc <- function(parms, Cnstnts, feedcomp, obsdata, times_nf, delt=delt, verbose=TRUE) { 
+  
+  print("Parameter values are:"); print(parms)
+  
+  initial <- read.table("initial_HNO32.txt",header=T)
+  initial[,more_names] <- matrix(0,nrow=nrow(initial),ncol=length(more_names)) # Set Q_zeros at zero
+  
+  out <- NULL; tailrows <- NULL
+  for (i in 1:nrow(feedcomp)){
+    Qt_0 <- as.numeric(initial[i,])
+    Qt_0_names <- c("Q_Fd","Q_Sd","Q_Wr","Q_Na","Q_Ni","Q_He","Q_Mi","Q_Ac","Q_Pr","Q_Bu","Q_Hy","Q_Me","f_NADH",more_names)
+    names(Qt_0) <- Qt_0_names
+    out[[length(out)+1]] <- NAD_confurc(times=times_nf[[i]],initial=Qt_0,feed=feedcomp[i,],Parms=parms,Constants=Cnstnts,
+                                        Yields=Yields,
+                                        feedintake=FI_rate_2m[[i]],stpsz=delt,output='FINAL_24h')
+    
+    plot(P_Mt_HyMe~time,data=out[[i]],type='l',lwd=2,col='darkblue',ylim=c(0,2))
+    tailrows <- rbind(tailrows,out[[i]][nrow(out[[i]]),Qt_0_names]) # Extract final row per treatment and state variable columns
+  } # End of for loop 
+  
+  if (length(obsdata) != length(out)) {stop('Lengths of obsdata and out are different')} # Check if obsdata and out have same length
+  
+  for (q in 1:length(obsdata)){
+    
+    out[[q]] <- out[[q]][which(match(out[[q]]$time,obsdata[[q]]$time+(final-24)) != 0),c("time","U_Hy_HyEm","P_Mt_HyMe")]
+    out[[q]]$time <- out[[q]]$time - final+24
+    out[[q]]$U_Hy_HyEm <- log(out[[q]]$U_Hy_HyEm)
+    colnames(out[[q]])[2] <- 'log_U_Hy_HyEm'
+    
+  } # End of for loop q; extract time, U_Hy_HyEm and P_Mt_HyMe matching observed timepoints; adjust time
+  
+  cost <- modCost(model = out[[1]][,c(1,2)], obs = obsdata[[1]][,c(1,2)], weight="mean") # calc SSR of H2 emission
+  cost <- modCost(model = out[[2]][,c(1,2)], obs = obsdata[[2]][,c(1,2)], cost = cost, weight="mean") # calc SSR of H2 emission
+  cost <- modCost(model = out[[3]][,c(1,2)], obs = obsdata[[3]][,c(1,2)], cost = cost, weight="mean") # calc SSR of H2 emission
+  cost <- modCost(model = out[[4]][,c(1,2)], obs = obsdata[[4]][,c(1,2)], cost = cost, weight="mean") # calc SSR of H2 emission
+  cost <- modCost(model = out[[5]][,c(1,2)], obs = obsdata[[5]][,c(1,2)], cost = cost, weight="mean") # calc SSR of H2 emission
+  
+  cost <- modCost(model = out[[1]][,c(1,3)], obs = obsdata[[1]][,c(1,3)], cost = cost, weight="mean") # calc SSR of CH4 emission
+  cost <- modCost(model = out[[2]][,c(1,3)], obs = obsdata[[2]][,c(1,3)], cost = cost, weight="mean") # calc SSR of CH4 emission
+  cost <- modCost(model = out[[3]][,c(1,3)], obs = obsdata[[3]][,c(1,3)], cost = cost, weight="mean") # calc SSR of CH4 emission
+  cost <- modCost(model = out[[4]][,c(1,3)], obs = obsdata[[4]][,c(1,3)], cost = cost, weight="mean") # calc SSR of CH4 emission
+  cost <- modCost(model = out[[5]][,c(1,3)], obs = obsdata[[5]][,c(1,3)], cost = cost, weight="mean") # calc SSR of CH4 emission
+  
+  write.table(t(c(parms,cost$model)),'par_HNO32_SSR.csv',sep=',',append=T, row.names=F, col.names=F)
+  cat('SSR is:',cost$model,'\n')
+  return(cost) # calc SSR of CH4 emission
+  
+} # End function Costfunc
+
+
+########################################
+# Deterministic parameter optimization #
+########################################
+
+parFit_HNO32 <- modFit(p=Na_par[-1],lower=0.05*Na_par[-1],upper=20*Na_par[-1],
+                      f=Costfunc,Cnstnts=c(Constants,Parms_7,Na_par[1]),feedcomp=feedcomp,times_nf=times_nf,
+                      obsdata=obsdata,method="BFGS",control=list(reltol=1e-8),delt=delt)
+write.table(summary(parFit_HNO32)$par,"pars_HNO32.csv",sep=",") 
+print(summary(parFit_HNO32))
+print(parFit_HNO32$convergence) # '0' indicates successful convergence. '1' indicates the function evaluation count 'max-eval' was reached
+print(parFit_HNO32$par)

@@ -1,0 +1,3 @@
+DMI	c_DM	NDF	St	Sr	WSC	Acin	Prin	Buin	Lain	k_SdHe	k_FdHe	k_PdPs	k_WrHe	c_For
+17.9	0.47	287.123	131.46	54.28	98.12	10.68	1.78	1.78	21.36	0.078218	0.042862	0.053613	14.00	0.7
+
