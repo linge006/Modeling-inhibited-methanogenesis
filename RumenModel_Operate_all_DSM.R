@@ -5,7 +5,7 @@ library(FME)
 
 # Set working directory 
 
-setwd("~/UCDavis/RumenModel_H2/CodePaperDSM")
+setwd("~/...")
 
 # The 'NAD_FME' function needs to be uploaded
 
